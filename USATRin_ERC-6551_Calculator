@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/proxy/Clones.sol";
+
+// Interface for the minimal proxy contract for TBAs
+interface ITBA {
+    function initialize(address owner) external;
+}
+
+// RIN Token contract extended with ERC-6551 support
+contract RINTokenERC6551 is ERC721, AccessControl {
+    using Clones for address;
+
+    address immutable tbaImplementation;
+    mapping(uint256 => address) public tokenToTBA; // Maps a RIN token ID to a TBA proxy address
+
+    constructor(address _tbaImplementation) ERC721("Renewable Identification Number", "RIN") {
+        tbaImplementation = _tbaImplementation;
+    }
+
+    // Function to mint a new RIN token to a TBA
+    function mintToTBA(uint256 tokenId, address owner) public {
+        require(hasRole(MINTER_ROLE, msg.sender), "Caller is not a minter");
+        address tbaProxy = tbaImplementation.clone();
+        ITBA(tbaProxy).initialize(owner);
+        tokenToTBA[tokenId] = tbaProxy;
+        _mint(tbaProxy, tokenId);
+    }
+
+    // Function to transfer a RIN token between TBAs
+    function transferBetweenTBAs(uint256 tokenId, address newOwner) public {
+        address tbaProxy = tokenToTBA[tokenId];
+        require(ITBA(tbaProxy).isOwner(msg.sender), "Caller is not the owner of the TBA");
+        address newTbaProxy = tbaImplementation.clone();
+        ITBA(newTbaProxy).initialize(newOwner);
+        tokenToTBA[tokenId] = newTbaProxy;
+        _transfer(tbaProxy, newTbaProxy, tokenId);
+    }
+}
+
+// TBA Contract
+contract TBA is ITBA {
+    address public owner;
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Caller is not the owner");
+        _;
+    }
+
+    function initialize(address _owner) external override {
+        require(owner == address(0), "TBA is already initialized");
+        owner = _owner;
+    }
+
+    function isOwner(address _address) external view returns (bool) {
+        return _address == owner;
+    }
+}
