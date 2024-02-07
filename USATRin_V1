@@ -1,0 +1,120 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
+
+/**
+ * @title USATRin: An ERC-6551 Compliant RIN Registration Contract
+ * @author TitleChain
+ * @notice This contract manages the lifecycle of Renewable Identification Number (RIN) registrations
+ * and integrates with external data sources like IRS, EPA, and SoftLedger via Chainlink Oracles.
+ * @dev This contract implements UUPS (Universal Upgradeable Proxy Standard) for upgradeability.
+ */
+contract USATRin is
+    Initializable,
+    UUPSUpgradeable,
+    OwnableUpgradeable,
+    ReentrancyGuardUpgradeable,
+    ChainlinkClient,
+    ERC721Upgradeable
+{
+    using Chainlink for Chainlink.Request;
+
+    // Constants for the Chainlink oracle
+    address private oracle;
+    bytes32 private jobId;
+    uint256 private fee;
+
+    // State variables
+    string private ricardianContractHash;
+    mapping(uint256 => string) private rinMetadata;
+
+    // Events
+    event RINRegistered(uint256 indexed rin, address indexed registrant);
+    event RegistrationStatusUpdated(uint256 indexed rin, string status);
+    event RicardianContractUpdated(string contractHash);
+    event OracleConfigurationUpdated(address oracle, bytes32 jobId, uint256 fee);
+    event MetadataUpdated(uint256 indexed rin, string metadata);
+
+    // Initialize the contract with the necessary details
+    function initialize(
+        address _owner,
+        address _oracle,
+        bytes32 _jobId,
+        uint256 _fee,
+        string memory _ricardianContractHash
+    ) public initializer {
+        __UUPSUpgradeable_init();
+        __Ownable_init();
+        __ReentrancyGuard_init();
+        __ERC721_init("USATRinToken", "USATR");
+        _transferOwnership(_owner);
+
+        setChainlinkToken(LINK_TOKEN_ADDRESS);
+        oracle = _oracle;
+        jobId = _jobId;
+        fee = _fee;
+        ricardianContractHash = _ricardianContractHash;
+    }
+
+    // Ensure only the owner can upgrade the contract
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    // Owner-only function to update the Ricardian contract hash
+    function updateRicardianContract(string memory _newHash) public onlyOwner {
+        require(bytes(_newHash).length > 0, "USATRin: New hash cannot be empty");
+        ricardianContractHash = _newHash;
+        emit RicardianContractUpdated(_newHash);
+    }
+
+    // Owner-only function to update the Chainlink oracle configuration
+    function updateOracleConfiguration(
+        address _oracle,
+        bytes32 _jobId,
+        uint256 _fee
+    ) public onlyOwner {
+        require(_oracle != address(0), "USATRin: Invalid oracle address");
+        require(_fee > 0, "USATRin: Fee must be greater than 0");
+        oracle = _oracle;
+        jobId = _jobId;
+        fee = _fee;
+        emit OracleConfigurationUpdated(_oracle, _jobId, _fee);
+    }
+
+    // Public function to register a RIN
+    function registerRIN(uint256 _rin, string memory _metadata) public nonReentrant {
+        // Ensure the RIN is not already registered
+        require(_exists(_rin) == false, "USATRin: RIN already registered");
+
+        // Mint a new RIN token
+        _mint(msg.sender, _rin);
+        _setTokenURI(_rin, _metadata);
+
+        emit RINRegistered(_rin, msg.sender);
+    }
+
+    // Function to update RIN metadata, callable by the owner or approved addresses
+    function updateRINMetadata(uint256 _rin, string memory _metadata) public {
+        require(_isApprovedOrOwner(_msgSender(), _rin), "USATRin: Not authorized to update metadata");
+        _setTokenURI(_rin, _metadata);
+        emit MetadataUpdated(_rin, _metadata);
+    }
+
+    // Internal function to set token URI (metadata)
+    function _setTokenURI(uint256 _rin, string memory _metadata) internal {
+        rinMetadata[_rin] = _metadata;
+    }
+
+    // Placeholder functions for external API integration with Chainlink
+    // ...
+
+    // More functions and business logic as needed
+    // ...
+
+    // Security checks, validations, and access control
+    // ...
+}
