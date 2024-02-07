@@ -1,0 +1,67 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract RINTracker {
+    // Immutable data
+    string public constant rinProducer = "Producer Name";
+    string public constant fuelDCode = "D6";
+    string public constant fuelCategory = "Renewable Gasoline (EV 1.5)";
+    uint256 public constant evMultiplier = 15; // Multiplied by 10 for precision
+
+    // Modifiable data
+    uint256 public gallonsAvailable;
+    uint256 public rinsAvailable;
+    uint256 public totalSold;
+    uint256 public rinsRemainingForSale;
+    uint256 public nextSN;
+
+    // Events
+    event GallonsUpdated(uint256 newGallons);
+    event RINsSold(uint256 amount, uint256 serialNumberStart, uint256 serialNumberEnd);
+
+    // Administrator role (for simplicity, we use the contract deployer)
+    address public admin;
+
+    constructor() {
+        admin = msg.sender; // Set the administrator as the deployer
+    }
+
+    // Modifier to restrict access to admin only
+    modifier onlyAdmin() {
+        require(msg.sender == admin, "Caller is not the administrator");
+        _;
+    }
+
+    // Function to update gallons available
+    function updateGallonsAvailable(uint256 _gallons) public onlyAdmin {
+        gallonsAvailable = _gallons;
+        rinsAvailable = gallonsAvailable * evMultiplier / 10; // Adjust for precision
+        emit GallonsUpdated(gallonsAvailable);
+    }
+
+    // Function to record a RIN sale
+    function recordRINSale(uint256 _amountSold, uint256 _serialNumberStart, uint256 _serialNumberEnd) public onlyAdmin {
+        require(_amountSold <= rinsRemainingForSale, "Not enough RINs available for sale");
+        require(_serialNumberEnd >= _serialNumberStart, "Invalid serial numbers");
+
+        totalSold += _amountSold;
+        rinsRemainingForSale -= _amountSold;
+        nextSN = _serialNumberEnd + 1;
+
+        emit RINsSold(_amountSold, _serialNumberStart, _serialNumberEnd);
+    }
+
+    // Additional functions to modify other dynamic fields can be added here
+    // ...
+
+    // Function to get the current state of the RINs
+    function getCurrentState() public view returns (
+        uint256 _gallonsAvailable,
+        uint256 _rinsAvailable,
+        uint256 _totalSold,
+        uint256 _rinsRemainingForSale,
+        uint256 _nextSN
+    ) {
+        return (gallonsAvailable, rinsAvailable, totalSold, rinsRemainingForSale, nextSN);
+    }
+}
