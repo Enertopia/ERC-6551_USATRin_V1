@@ -1,7 +1,7 @@
-// src/components/RegisterRIN.js
 import React, { useState, useEffect } from 'react';
 import getWeb3 from '../utils/getWeb3';
 import getContract from '../utils/getContract';
+import { CONTRACT_ADDRESS, CONTRACT_ABI } from '../config'; // Assuming these are defined
 
 const RegisterRIN = () => {
   const [web3, setWeb3] = useState(null);
@@ -10,13 +10,14 @@ const RegisterRIN = () => {
   const [rin, setRin] = useState('');
   const [metadata, setMetadata] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     const init = async () => {
       try {
         const web3 = await getWeb3();
         const accounts = await web3.eth.getAccounts();
-        const contract = await getContract(web3);
+        const contract = new web3.eth.Contract(CONTRACT_ABI, CONTRACT_ADDRESS); // Directly using imported ABI and address
         setWeb3(web3);
         setAccounts(accounts);
         setContract(contract);
@@ -29,14 +30,22 @@ const RegisterRIN = () => {
     init();
   }, []);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const validateInput = () => {
     if (!rin || !metadata) {
       alert('Please fill in all fields.');
-      return;
+      return false;
     }
+    // Add more specific validation logic here if necessary
+    return true;
+  };
 
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!validateInput()) return;
+
+    setIsLoading(true);
     setStatusMessage('Registering RIN...');
+
     try {
       await contract.methods.registerRIN(rin, metadata).send({ from: accounts[0] });
       setStatusMessage('RIN registered successfully.');
@@ -45,6 +54,8 @@ const RegisterRIN = () => {
     } catch (error) {
       setStatusMessage('Failed to register RIN. See console for details.');
       console.error(error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -69,7 +80,7 @@ const RegisterRIN = () => {
             required
           />
         </div>
-        <button type="submit">Submit</button>
+        <button type="submit" disabled={isLoading}>{isLoading ? 'Registering...' : 'Submit'}</button>
       </form>
       {statusMessage && <p>{statusMessage}</p>}
     </div>
