@@ -1,49 +1,77 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts/proxy/Clones.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-// Interface for the minimal proxy contract for TBAs
 interface ITBA {
     function initialize(address owner) external;
+    function transferOwnership(address newOwner) external;
 }
 
-// RIN Token contract extended with ERC-6551 support
-contract RINTokenERC6551 is ERC721, AccessControl {
+contract RINTokenERC6551 is Initializable, ERC721Upgradeable, AccessControlUpgradeable, UUPSUpgradeable {
     using Clones for address;
 
-    address immutable tbaImplementation;
-    mapping(uint256 => address) public tokenToTBA; // Maps a RIN token ID to a TBA proxy address
+    address private tbaImplementation;
+    mapping(uint256 => address) public tokenToTBA;
 
-    constructor(address _tbaImplementation) ERC721("Renewable Identification Number", "RIN") {
+    bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+
+    function initialize(address _tbaImplementation) public initializer {
+        __ERC721_init("Renewable Identification Number", "RIN");
+        __AccessControl_init();
+        __UUPSUpgradeable_init();
+
         tbaImplementation = _tbaImplementation;
+        _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
+        _setupRole(UPGRADER_ROLE, _msgSender());
     }
 
-    // Function to mint a new RIN token to a TBA
-    function mintToTBA(uint256 tokenId, address owner) public {
-        require(hasRole(MINTER_ROLE, msg.sender), "Caller is not a minter");
+    function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
+
+    function mintToTBA(uint256 tokenId, address owner) public onlyRole(MINTER_ROLE) {
         address tbaProxy = tbaImplementation.clone();
         ITBA(tbaProxy).initialize(owner);
         tokenToTBA[tokenId] = tbaProxy;
         _mint(tbaProxy, tokenId);
     }
 
-    // Function to transfer a RIN token between TBAs
     function transferBetweenTBAs(uint256 tokenId, address newOwner) public {
         address tbaProxy = tokenToTBA[tokenId];
-        require(ITBA(tbaProxy).isOwner(msg.sender), "Caller is not the owner of the TBA");
-        address newTbaProxy = tbaImplementation.clone();
-        ITBA(newTbaProxy).initialize(newOwner);
-        tokenToTBA[tokenId] = newTbaProxy;
-        _transfer(tbaProxy, newTbaProxy, tokenId);
+        require(ITBA(tbaProxy).isOwner(_msgSender()), "Caller is not the owner of the TBA");
+        ITBA(tbaProxy).transferOwnership(newOwner);
+        // No need to create a new TBA proxy here, just transfer ownership of the existing one
+    }
+
+    // Additional functionality to enhance utility without significantly increasing gas costs
+    function bulkMintToTBAs(uint256[] calldata tokenIds, address[] calldata owners) public onlyRole(MINTER_ROLE) {
+        require(tokenIds.length == owners.length, "TokenIds and owners length mismatch");
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            mintToTBA(tokenIds[i], owners[i]);
+        }
+    }
+
+    // Enable batch transfer for efficiency
+    function batchTransferBetweenTBAs(uint256[] calldata tokenIds, address newOwner) public {
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            transferBetweenTBAs(tokenIds[i], newOwner);
+        }
+    }
+
+    // Overriding _beforeTokenTransfer for additional checks or logic if needed
+    function _beforeTokenTransfer(address from, address to, uint256 tokenId) internal override {
+        super._beforeTokenTransfer(from, to, tokenId);
+        // Custom logic or checks can be added here
     }
 }
 
-// TBA Contract
 contract TBA is ITBA {
     address public owner;
+
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Caller is not the owner");
@@ -53,6 +81,12 @@ contract TBA is ITBA {
     function initialize(address _owner) external override {
         require(owner == address(0), "TBA is already initialized");
         owner = _owner;
+    }
+
+    function transferOwnership(address newOwner) external override onlyOwner {
+        require(newOwner != address(0), "New owner is the zero address");
+        emit OwnershipTransferred(owner, newOwner);
+        owner = newOwner;
     }
 
     function isOwner(address _address) external view returns (bool) {
