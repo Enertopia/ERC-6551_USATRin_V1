@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import Web3 from 'web3';
 
-// Placeholder for the contract ABI and address
+// Assuming .env file contains REACT_APP_CONTRACT_ADDRESS
 const contractABI = require('./contracts/USATRin.json').abi;
-const contractAddress = 'YOUR_CONTRACT_ADDRESS_HERE';
+const contractAddress = process.env.REACT_APP_CONTRACT_ADDRESS;
 
 const App = () => {
   const [web3, setWeb3] = useState(null);
@@ -16,37 +16,48 @@ const App = () => {
   useEffect(() => {
     const initWeb3 = async () => {
       if (window.ethereum) {
+        const web3Instance = new Web3(window.ethereum);
         try {
-          await window.ethereum.request({ method: 'eth_requestAccounts' });
-          const web3Instance = new Web3(window.ethereum);
-          const accounts = await web3Instance.eth.getAccounts();
+          const accounts = await web3Instance.eth.requestAccounts(); // Updated method call
           const contractInstance = new web3Instance.eth.Contract(contractABI, contractAddress);
           setWeb3(web3Instance);
           setAccounts(accounts);
           setContract(contractInstance);
         } catch (error) {
-          alert('Failed to load web3, accounts, or contract. Check console for details.');
+          setStatus('Failed to load web3, accounts, or contract.');
           console.error(error);
         }
       } else {
-        alert('Please install MetaMask to use this DApp.');
+        setStatus('Please install MetaMask to use this DApp.');
       }
     };
 
     initWeb3();
+
+    // Cleanup function to reset state on unmount
+    return () => {
+      setWeb3(null);
+      setAccounts([]);
+      setContract(null);
+    };
   }, []);
 
   const handleRegisterRIN = async (e) => {
     e.preventDefault();
-    if (contract) {
-      setStatus('Registering RIN...');
-      try {
-        await contract.methods.registerRIN(rin, metadata).send({ from: accounts[0] });
-        setStatus('RIN registered successfully.');
-      } catch (error) {
-        console.error('Error registering RIN:', error);
-        setStatus('Failed to register RIN.');
-      }
+    if (!rin || !metadata) {
+      setStatus('Please fill in all the fields.');
+      return;
+    }
+
+    setStatus('Registering RIN...');
+    try {
+      await contract.methods.registerRIN(rin, metadata).send({ from: accounts[0] });
+      setStatus('RIN registered successfully.');
+      setRin('');
+      setMetadata('');
+    } catch (error) {
+      setStatus('Failed to register RIN. Check console for details.');
+      console.error('Error registering RIN:', error);
     }
   };
 
@@ -69,7 +80,7 @@ const App = () => {
         />
         <button type="submit">Register RIN</button>
       </form>
-      {status && <p>{status}</p>}
+      <p>{status}</p>
     </div>
   );
 };
