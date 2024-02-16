@@ -1,67 +1,84 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-contract RINTracker {
-    // Immutable data
-    string public constant rinProducer = "Producer Name";
-    string public constant fuelDCode = "D6";
-    string public constant fuelCategory = "Renewable Gasoline (EV 1.5)";
-    uint256 public constant evMultiplier = 15; // Multiplied by 10 for precision
+import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-    // Modifiable data
-    uint256 public gallonsAvailable;
-    uint256 public rinsAvailable;
-    uint256 public totalSold;
-    uint256 public rinsRemainingForSale;
-    uint256 public nextSN;
+contract EnhancedRINTrackerUpgradeable is Initializable, UUPSUpgradeable, AccessControlUpgradeable, ReentrancyGuardUpgradeable {
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 public constant AUDITOR_ROLE = keccak256("AUDITOR_ROLE");
+    IERC20Upgradeable public rinToken;
 
-    // Events
-    event GallonsUpdated(uint256 newGallons);
-    event RINsSold(uint256 amount, uint256 serialNumberStart, uint256 serialNumberEnd);
-
-    // Administrator role (for simplicity, we use the contract deployer)
-    address public admin;
-
-    constructor() {
-        admin = msg.sender; // Set the administrator as the deployer
+    struct RINData {
+        string producer;
+        string fuelDCode;
+        string fuelCategory;
+        uint256 evMultiplier;
     }
 
-    // Modifier to restrict access to admin only
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "Caller is not the administrator");
-        _;
+    RINData public rinData;
+    uint256 public totalGallonsProduced;
+    uint256 public totalRINsGenerated;
+    uint256 public totalRINsSold;
+    uint256 public nextSerialNumber;
+
+    event GallonsProducedUpdated(uint256 newGallonsProduced);
+    event RINsGenerated(uint256 amountGenerated);
+    event RINsSold(uint256 amountSold, uint256 serialNumberStart, uint256 serialNumberEnd);
+
+    function initialize(
+        address rinTokenAddress,
+        string memory producer,
+        string memory fuelDCode,
+        string memory fuelCategory,
+        uint256 evMultiplier
+    ) public initializer {
+        __AccessControl_init();
+        __ReentrancyGuard_init();
+        __UUPSUpgradeable_init();
+
+        _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
+        _setupRole(ADMIN_ROLE, _msgSender());
+
+        rinToken = IERC20Upgradeable(rinTokenAddress);
+        rinData = RINData(producer, fuelDCode, fuelCategory, evMultiplier);
+
+        totalGallonsProduced = 0;
+        totalRINsGenerated = 0;
+        totalRINsSold = 0;
+        nextSerialNumber = 1;
     }
 
-    // Function to update gallons available
-    function updateGallonsAvailable(uint256 _gallons) public onlyAdmin {
-        gallonsAvailable = _gallons;
-        rinsAvailable = gallonsAvailable * evMultiplier / 10; // Adjust for precision
-        emit GallonsUpdated(gallonsAvailable);
+    function _authorizeUpgrade(address newImplementation) internal override onlyRole(ADMIN_ROLE) {}
+
+    function updateGallonsProduced(uint256 newGallons) external onlyRole(ADMIN_ROLE) {
+        totalGallonsProduced += newGallons;
+        uint256 newRINs = (newGallons * rinData.evMultiplier) / 10;
+        totalRINsGenerated += newRINs;
+        emit GallonsProducedUpdated(totalGallonsProduced);
+        emit RINsGenerated(newRINs);
     }
 
-    // Function to record a RIN sale
-    function recordRINSale(uint256 _amountSold, uint256 _serialNumberStart, uint256 _serialNumberEnd) public onlyAdmin {
-        require(_amountSold <= rinsRemainingForSale, "Not enough RINs available for sale");
-        require(_serialNumberEnd >= _serialNumberStart, "Invalid serial numbers");
+    function sellRINs(uint256 amount, uint256 pricePerRIN, address buyer) external onlyRole(ADMIN_ROLE) nonReentrant {
+        require(amount <= rinToken.balanceOf(address(this)), "Insufficient RINs available");
+        uint256 totalCost = amount * pricePerRIN;
 
-        totalSold += _amountSold;
-        rinsRemainingForSale -= _amountSold;
-        nextSN = _serialNumberEnd + 1;
+        require(rinToken.transfer(buyer, amount), "RIN transfer failed");
 
-        emit RINsSold(_amountSold, _serialNumberStart, _serialNumberEnd);
+        totalRINsSold += amount;
+        uint256 serialNumberStart = nextSerialNumber;
+        uint256 serialNumberEnd = nextSerialNumber + amount - 1;
+        nextSerialNumber += amount;
+
+        emit RINsSold(amount, serialNumberStart, serialNumberEnd);
     }
 
-    // Additional functions to modify other dynamic fields can be added here
-    // ...
+    // Additional functionalities as needed
 
-    // Function to get the current state of the RINs
-    function getCurrentState() public view returns (
-        uint256 _gallonsAvailable,
-        uint256 _rinsAvailable,
-        uint256 _totalSold,
-        uint256 _rinsRemainingForSale,
-        uint256 _nextSN
-    ) {
-        return (gallonsAvailable, rinsAvailable, totalSold, rinsRemainingForSale, nextSN);
+    function getCurrentState() external view returns (uint256, uint256, uint256, uint256) {
+        return (totalGallonsProduced, totalRINsGenerated, totalRINsSold, nextSerialNumber);
     }
 }
