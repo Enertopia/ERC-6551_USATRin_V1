@@ -1,68 +1,86 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-contract VerdisRINManagement {
-    // Struct to represent RIN purchase orders
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
+
+contract ImprovedRINManagement is AccessControl, ReentrancyGuard {
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 public constant AUDITOR_ROLE = keccak256("AUDITOR_ROLE");
+    IERC20 public paymentToken;
+
     struct RINPurchaseOrder {
         uint256 id;
         address buyer;
         address seller;
-        uint256 volumeInGallons; // Volume of fuel tied to RINs
-        uint256 rinAmount; // Amount of RINs calculated based on volume and type
-        uint256 pricePerRin; // Price per RIN, could be in ether or another token
-        string rinType; // Type of RIN, e.g., "D6", "D4"
-        bool isApproved; // Whether the PO has been approved
-        bool isFulfilled; // Whether the RINs have been transferred
+        uint256 volumeInGallons;
+        uint256 rinAmount;
+        uint256 pricePerRin;
+        string rinType;
+        bool isApproved;
+        bool isFulfilled;
     }
 
-    uint256 public nextPOId = 1;
+    uint256 public nextPOId;
     mapping(uint256 => RINPurchaseOrder) public rinPurchaseOrders;
-    address public admin; // Contract administrator
-    mapping(address => uint256) public rinBalances; // RIN balances for each address
+    mapping(address => uint256) public rinBalances;
 
-    event PurchaseOrderCreated(uint256 indexed id, address indexed buyer, address indexed seller, uint256 volumeInGallons, uint256 rinAmount, string rinType);
+    event PurchaseOrderCreated(uint256 indexed id, address buyer, address seller, uint256 rinAmount, string rinType);
     event PurchaseOrderApproved(uint256 indexed id);
     event RINsTransferred(uint256 indexed id, address from, address to, uint256 rinAmount);
+    event PaymentTransferred(uint256 indexed id, address from, address to, uint256 amount);
 
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "Not authorized as admin");
+    modifier onlyRole(bytes32 role) {
+        require(hasRole(role, msg.sender), "Improper permissions");
         _;
     }
 
-    constructor() {
-        admin = msg.sender; // Set the contract deployer as the admin
+    constructor(address _paymentTokenAddress) {
+        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _setupRole(ADMIN_ROLE, msg.sender);
+        nextPOId = 1;
+        paymentToken = IERC20(_paymentTokenAddress);
     }
 
-    // Function to create a new RIN Purchase Order
     function createRINPurchaseOrder(address _seller, uint256 _volumeInGallons, uint256 _rinAmount, uint256 _pricePerRin, string memory _rinType) public {
         rinPurchaseOrders[nextPOId] = RINPurchaseOrder(nextPOId, msg.sender, _seller, _volumeInGallons, _rinAmount, _pricePerRin, _rinType, false, false);
-        emit PurchaseOrderCreated(nextPOId, msg.sender, _seller, _volumeInGallons, _rinAmount, _rinType);
+        emit PurchaseOrderCreated(nextPOId, msg.sender, _seller, _rinAmount, _rinType);
         nextPOId++;
     }
 
-    // Admin function to approve a RIN Purchase Order
-    function approveRINPurchaseOrder(uint256 _id) public onlyAdmin {
+    function approveRINPurchaseOrder(uint256 _id) public onlyRole(ADMIN_ROLE) {
         RINPurchaseOrder storage po = rinPurchaseOrders[_id];
         require(!po.isApproved, "PO already approved");
         po.isApproved = true;
         emit PurchaseOrderApproved(_id);
     }
 
-    // Function to simulate the transfer of RINs from seller to buyer
-    function transferRINs(uint256 _id) public {
+    function fulfillRINPurchaseOrder(uint256 _id) public nonReentrant onlyRole(ADMIN_ROLE) {
         RINPurchaseOrder storage po = rinPurchaseOrders[_id];
         require(po.isApproved, "PO must be approved");
         require(!po.isFulfilled, "RINs already transferred");
-        require(msg.sender == po.seller, "Only the seller can transfer RINs");
 
-        // Simulate RIN transfer logic here
-        // Update RIN balances as an example
+        uint256 paymentAmount = po.rinAmount * po.pricePerRin;
+        require(paymentToken.transferFrom(po.buyer, po.seller, paymentAmount), "Payment transfer failed");
+
         rinBalances[po.seller] -= po.rinAmount;
         rinBalances[po.buyer] += po.rinAmount;
-
         po.isFulfilled = true;
+
         emit RINsTransferred(_id, po.seller, po.buyer, po.rinAmount);
+        emit PaymentTransferred(_id, po.buyer, po.seller, paymentAmount);
     }
 
-    // Additional functionalities can be added as needed
+    // Additional functionalities as needed
+
+    // Function to grant roles
+    function grantRole(bytes32 role, address account) public override onlyRole(ADMIN_ROLE) {
+        _grantRole(role, account);
+    }
+
+    // Function to revoke roles
+    function revokeRole(bytes32 role, address account) public override onlyRole(ADMIN_ROLE) {
+        _revokeRole(role, account);
+    }
 }
